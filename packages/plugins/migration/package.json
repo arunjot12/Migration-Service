@@ -1,0 +1,43 @@
+{
+  "name": "@centrifuge-cli/plugin-migration",
+  "version": "0.1.0",
+  "type": "commonjs",
+  "license": "Apache-2",
+  "author": "Centrifuge <admin@centrifuge.io>",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "repository": {
+    "type": "git",
+    "directory": "packages/plugins/migration",
+    "url": "https://github.com/centrifuge/centrifuge-cli.git"
+  },
+  "scripts": {
+    "clean": "rimraf dist && rimraf tsconfig.tsbuildinfo",
+    "prepack": "yarn build",
+    "build": "yarn clean && yarn compile",
+    "compile": "tsc --build",
+    "test": "echo 'no test'",
+    "lint": "eslint \"./src/**/*.{ts,tsx}\" --max-warnings=0"
+  },
+  "engines": {
+    "node": ">=8.0.0"
+  },
+  "dependencies": {
+    "@oclif/command": "^1.8.0",
+    "@polkadot/api": "^7.13.1",
+    "@polkadot/api-augment": "^7.13.1",
+    "@centrifuge-cli/core": "0.1.0",
+    "@centrifuge-cli/dispatcher": "0.1.0",
+    "json-bigint": "^1.0.0"
+  },
+  "oclif": {
+    "commands": "./dist/commands",
+    "bin": "migration",
+    "plugins": [
+      "@oclif/plugin-help"
+    ]
+  },
+  "files": [
+    "/dist"
+  ]
+}
