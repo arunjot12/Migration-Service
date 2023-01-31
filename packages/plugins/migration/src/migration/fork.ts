@@ -52,6 +52,8 @@ async function fetchState(api: ApiPromise, at: Hash, key: StorageKey): Promise<A
 
     // The substrate api does provide the actual prefix, as the next_key, as we do here, when next key
     // is not available. In order to use the at option, we do this here upfront.
+
+    
     let keyArray = await api.rpc.state.getKeysPaged(key, 1000, key, at);
     
     // getKeysPaged does not work for StorageValues, lets try if it is one
@@ -81,7 +83,7 @@ async function fetchState(api: ApiPromise, at: Hash, key: StorageKey): Promise<A
         let intermArray = await api.rpc.state.getKeysPaged(key, 1000, nextStartKey, at);
 
         accumulate = accumulate + intermArray.length;
-        process.stdout.write("Fetched keys:====> " + accumulate + "\r");
+        process.stdout.write("Total Fetched keys:====> " + accumulate + "\r");
 
         if (intermArray.length === 0) {
             fetched = true;

@@ -1,10 +1,9 @@
 import {ApiPromise} from "@polkadot/api";
 import { xxhashAsHex } from "@polkadot/util-crypto";
-import {AccountInfo, Balance, Hash, ProxyDefinition, ContractInfo, PrefabWasmModule} from "@polkadot/types/interfaces";
+import {AccountInfo, Balance, Hash, ProxyDefinition, ContractInfo, PrefabWasmModule, BalanceLock, StakingLedger} from "@polkadot/types/interfaces";
 import {insertOrNewArray, StorageItem, StorageValueValue, StorageMapValue, getOrInsertMap} from "../migration/common";
 import {StorageKey} from "@polkadot/types";
 import {compactAddLength} from "@polkadot/util";
-import { OldAliveContractInfo } from "./types";
 
 // Transform the source state to match the appropriate schema in the destination
 export async function transform(
@@ -27,7 +26,10 @@ export async function transform(
             let palletKey = xxhashAsHex("Contracts", 128);
             let palletItems = getOrInsertMap(state, palletKey);
             await transformContract(fromApi, toApi, palletItems, keyValues);
-
+        } else if (key.startsWith(xxhashAsHex("Staking",128))) {
+            let palletKey = xxhashAsHex("Staking", 128);
+            let palletItems = getOrInsertMap(state, palletKey);
+            await transformStaking(fromApi, toApi, palletItems, keyValues);
         } else if (key.startsWith(xxhashAsHex("Balances", 128))) {
             let palletKey = xxhashAsHex("Balances", 128);
             let palletItems = getOrInsertMap(state, palletKey);
@@ -199,6 +201,26 @@ async function transformContract(
     }
 }
 
+async function transformStaking(
+    fromApi: ApiPromise,
+    toApi: ApiPromise,
+    state: Map<string, Array<StorageItem>>,
+    keyValues: Array<[StorageKey, Uint8Array ]>
+) {
+    // Match against the actual storage items of a pallet.
+    for(let [patriciaKey, value] of keyValues) {
+        let codeStorage = xxhashAsHex("Staking", 128) + xxhashAsHex("Ledger", 128).slice(2);
+        if (patriciaKey.toHex().startsWith(codeStorage)) {
+            let pkStorageItem = xxhashAsHex("Staking", 128) + xxhashAsHex("Ledger", 128).slice(2);
+            await insertOrNewArray(state, pkStorageItem, await transformStakingLedger(fromApi, toApi, patriciaKey, value));
+        } 
+        else {
+            return Promise.reject("Fetched data that can not be transformed. PatriciaKey is: " + patriciaKey.toHuman());
+        }
+    }
+}
+
+
 async function transformContractCodeStorage(fromApi: ApiPromise, toApi: ApiPromise, completeKey: StorageKey, scaleOldCodeStorage:  Uint8Array): Promise<StorageItem> {
     let contractStorageCode = fromApi.createType("PrefabWasmModule", scaleOldCodeStorage);
     // let newAccountInfo = await toApi.createType("AccountInfo", [
@@ -219,23 +241,13 @@ async function transformContractCodeStorage(fromApi: ApiPromise, toApi: ApiPromi
     //     return Promise.reject("Transformation failed. AccountData Balances. (Left: " + old + " vs. " + "Right: " + newAccountInfo.data.free.toBigInt());
     // }
 
-    console.log("contractStorageCode.toU8a(true) =====> ", contractStorageCode.toHuman());
-    console.log("completeKey =====> ", completeKey.toHuman());
-
     return new StorageMapValue(contractStorageCode.toU8a(true), completeKey);
 }
+
 
 async function transformContractContractInfoOf(fromApi: ApiPromise, toApi: ApiPromise, completeKey: StorageKey, scaleOldContractInfo:  Uint8Array): Promise<StorageItem> {
     console.log("================= transformContractContractInfoOf ================== ");
     
-    
-    
-    
-    console.log("=========== Before ===========");
-
-
-
-    console.log("=========== End ===========");
     let contractContractInfoOf = fromApi.createType("MyContractInfo", scaleOldContractInfo).toHuman();
     
     let newAccountInfo = await toApi.createType("AliveContractInfo", [
@@ -319,8 +331,7 @@ async function transformBalances(
             await insertOrNewArray(state, pkStorageItem, await transformBalancesTotalIssuance(fromApi, toApi, patriciaKey, value));
         } else if (patriciaKey.toHex().startsWith(xxhashAsHex("Balances", 128) + xxhashAsHex("Locks", 128).slice(2))){
             let pkStorageItem = xxhashAsHex("Balances", 128) + xxhashAsHex("Locks", 128).slice(2);
-            return Promise.reject(pkStorageItem);
-            // await insertOrNewArray(state, pkStorageItem, await transformBalancesLocks(fromApi, toApi, patriciaKey, value));
+            await insertOrNewArray(state, pkStorageItem, await transformBalancesLocks(fromApi, toApi, patriciaKey, value));
         }
          else {
             return Promise.reject("Fetched data that can not be transformed. Part of Balances. PatriciaKey is: " + patriciaKey.toHex());
@@ -339,15 +350,52 @@ async function transformBalancesTotalIssuance(fromApi: ApiPromise, toApi: ApiPro
     return new StorageValueValue(newIssuance.toU8a(true));
 }
 
-async function transformBalancesLocks(fromApi: ApiPromise, toApi: ApiPromise, completeKey: StorageKey, scaleOldTotalIssuance:  Uint8Array): Promise<StorageItem> {
-    let oldIssuance = fromApi.createType("Balance", scaleOldTotalIssuance);
-    let newIssuance = toApi.createType("Balance", oldIssuance.toU8a(true));
+async function transformBalancesLocks(fromApi: ApiPromise, toApi: ApiPromise, completeKey: StorageKey, scaleOldBalanceLocks:  Uint8Array): Promise<StorageItem> {
+    let oldBalanceLock = fromApi.createType("BalanceLock", scaleOldBalanceLocks);
 
-    if (oldIssuance.toBigInt() !== newIssuance.toBigInt()) {
-        return Promise.reject("Transformation failed. TotalIssuance. (Left: " + oldIssuance.toJSON() + " vs. " + "Right: " + newIssuance.toJSON());
+    console.log("========oldBalanceLocks==========", oldBalanceLock.toHuman());    
+    
+    let newBalanceLock = await toApi.createType("BalanceLock", [
+        oldBalanceLock.id,
+        oldBalanceLock.amount,
+        oldBalanceLock.reasons,
+    ]);
+
+    if (oldBalanceLock.amount.toBigInt() !== newBalanceLock.amount.toBigInt()) {
+        let old = oldBalanceLock.amount.toBigInt();
+        return Promise.reject("Transformation failed. AccountData Balances. (Left: " + old + " vs. " + "Right: " + newBalanceLock.amount.toBigInt());
     }
 
-    return new StorageValueValue(newIssuance.toU8a(true));
+    return new StorageMapValue(newBalanceLock.toU8a(true), completeKey);
+}
+
+
+
+async function transformStakingLedger(fromApi: ApiPromise, toApi: ApiPromise, completeKey: StorageKey, scaleOldStakingLedger:  Uint8Array): Promise<StorageItem> {
+    let oldStakingLedger = fromApi.createType("StakingLedger", scaleOldStakingLedger);
+
+    console.log("oldStakingLedger ========> ", oldStakingLedger);
+
+    let newStakingLedger = await toApi.createType("StakingLedger", [
+        oldStakingLedger.stash,
+        oldStakingLedger.total,
+        oldStakingLedger.active,
+        oldStakingLedger.unlocking,
+        oldStakingLedger.claimedRewards,
+    ]);
+
+    if (oldStakingLedger.total.toBigInt() !== newStakingLedger.total.toBigInt()) {
+        let old = oldStakingLedger.total.toBigInt();
+        return Promise.reject("Transformation failed. AccountData Balances. (Left: " + old + " vs. " + "Right: " + newStakingLedger.total.toBigInt());
+    }
+
+    let a = newStakingLedger.toU8a(true);
+    console.log( "a ============> ", a);
+    console.log( "b ============> ", oldStakingLedger.toU8a(true));
+    console.log( "scaleOldStakingLedger ====> ", scaleOldStakingLedger);
+
+    // return new StorageMapValue(newStakingLedger.toU8a(true), completeKey);
+    return new StorageMapValue(scaleOldStakingLedger, completeKey);
 }
 
 async function transformVesting(

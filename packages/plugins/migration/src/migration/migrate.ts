@@ -1,6 +1,6 @@
 import {ApiPromise, SubmittableResult} from "@polkadot/api";
 import { xxhashAsHex} from "@polkadot/util-crypto";
-import {AccountId, Balance, Hash, VestingInfo} from "@polkadot/types/interfaces";
+import {AccountId, Balance, Hash, VestingInfo, StakingLedger} from "@polkadot/types/interfaces";
 import {
     StorageItemElement,
     PalletElement,
@@ -436,7 +436,6 @@ export async function buildExtrinsics(
     toApi: ApiPromise,
 ): Promise<Map<string, Map<string, Array<SubmittableExtrinsic<ApiTypes, SubmittableResult>>>>> {
     let extrinsics: Map<string, Map<string, Array<SubmittableExtrinsic<ApiTypes, SubmittableResult>>>> = new Map();
-    let counter = 0;
     // For every prefix do the correct transformation.
     for (let [prefix, keyValues] of Array.from(destData)) {
         
@@ -445,13 +444,14 @@ export async function buildExtrinsics(
             let palletItems = getOrInsertMap(extrinsics, prefix);
             await prepareSystem(toApi, palletItems, keyValues);
         }
+        else if (prefix.startsWith(xxhashAsHex("Staking", 128))) {
+            let palletItems = getOrInsertMap(extrinsics, prefix);
+            await prepareStaking(toApi, palletItems, keyValues);
+        }
         else if (prefix.startsWith(xxhashAsHex("Contracts", 128))) {
             let palletItems = getOrInsertMap(extrinsics, prefix);
             await prepareContract(toApi, palletItems, keyValues);
-
         } else if (prefix.startsWith(xxhashAsHex("Balances", 128))) {
-            counter ++;
-
             let palletItems = getOrInsertMap(extrinsics, prefix);
             await prepareBalances(toApi, palletItems, keyValues);
 
@@ -627,6 +627,24 @@ async function prepareContract(
     }
 }
 
+
+async function prepareStaking(
+    toApi: ApiPromise,
+    xts: Map<string, Array<SubmittableExtrinsic<ApiTypes, SubmittableResult>>>,
+    keyValues: Map<string, Array<StorageItem>>
+){
+    // Match against the actual storage items of a pallet.
+    for(let [palletStorageItemKey, values] of Array.from(keyValues)) {
+        if (palletStorageItemKey === (xxhashAsHex("Staking", 128) + xxhashAsHex("Ledger", 128).slice(2))) {
+            xts.set(palletStorageItemKey, await prepareStakingLedger(toApi, values));
+        } else {
+            return Promise.reject("Fetched data that can not be migrated. PatriciaKey is: " + palletStorageItemKey);
+        }
+    }
+}
+
+
+
 async function prepareProxy(
     toApi: ApiPromise,
     xts: Map<string, Array<SubmittableExtrinsic<ApiTypes, SubmittableResult>>>,
@@ -765,6 +783,56 @@ async function prepareContractsCodeStorage(
     return xts;
 }
 
+async function prepareStakingLedger(
+    toApi: ApiPromise,
+    values: StorageItem[]
+): Promise<Array<SubmittableExtrinsic<ApiTypes, SubmittableResult>>> {
+
+    console.log("====== prepareStakingLedger =============");
+    let xts: Array<SubmittableExtrinsic<ApiTypes, SubmittableResult>> = new Array();
+    let packetOfAccounts: Array<[ AccountId, StakingLedger ]> = new Array();
+
+    // @ts-ignore
+    const maxAccountsOnChain = toApi.consts.migration.migrationMaxAccounts.toNumber();
+
+    // For safety reasons we reduce 1/3 of the max amount here
+    const maxAccounts = Math.round(maxAccountsOnChain - ((1/3) * maxAccountsOnChain));
+
+    let counter = 0;
+    for (const item of values) {
+        counter += 1;
+        
+        if (item instanceof StorageMapValue) {
+            // if (packetOfAccounts.length === maxAccounts - 1  || counter === values.length) {
+                let accountId = toApi.createType("AccountId", item.patriciaKey.toU8a(true).slice(-32))
+
+                console.log("Before staking Ledger =====> 2 ");
+                let stakingInfo = toApi.createType("StakingLedger", item.value);
+
+                console.log("stakingInfo ===========> ", stakingInfo.toHuman());
+                console.log("accountId ========> ", accountId.toHuman());
+
+            //     // push the last element and prepare extrinsic
+            //     console.log("Before staking Ledger =====> 1");
+                packetOfAccounts.push([accountId, stakingInfo]);
+            //     console.log("Before staking Ledger =====> 2");
+                xts.push(toApi.tx.migration.migrateStakingLedger(packetOfAccounts));
+                console.log("Before staking Ledger =====> 3");
+                packetOfAccounts = new Array();
+            // } else {
+                // packetOfAccounts.push(await retrieveIdAndAccount(item));
+                // xts.push(toApi.tx.migration.migrateStakingLedger(packetOfAccounts));
+                // return Promise.reject("No Key/Value");
+            // }
+            
+        } else {
+            return Promise.reject("Expected Staking.Bonded storage values to be of type StorageMapValue. Got: " + JSON.stringify(item));
+        }
+    }
+
+    return xts;
+}
+
 async function prepareContractsContractInfoOf(
     toApi: ApiPromise,
     values: StorageItem[]
@@ -801,10 +869,6 @@ async function prepareContractsContractInfoOf(
     return xts;
 }
 
-
-
-
-
 async function retrieveIdAndAccount(item: StorageMapValue): Promise<[ Uint8Array,  Uint8Array]> {
     const id = compactAddLength(item.patriciaKey.toU8a(true));
     const value = compactAddLength(item.value);
@@ -820,6 +884,8 @@ async function prepareBalances(
     for(let [palletStorageItemKey, values] of Array.from(keyValues)) {
         if (palletStorageItemKey === xxhashAsHex("Balances", 128) + xxhashAsHex("TotalIssuance", 128).slice(2)) {
             xts.set(palletStorageItemKey, await prepareBalancesTotalIssuance(toApi, values));
+        } else if (palletStorageItemKey === xxhashAsHex("Balances", 128) + xxhashAsHex("Locks", 128).slice(2)) {
+            xts.set(palletStorageItemKey, await prepareBalancesLocks(toApi, values));
         }
          else {
             return Promise.reject("Fetched data that can not be migrated. PatriciaKey is: " + palletStorageItemKey);
@@ -843,6 +909,44 @@ async function prepareBalancesTotalIssuance(
             xts.push(toApi.tx.migration.migrateBalancesIssuance(issuance))
         } else {
             return Promise.reject("Expected Balances.TotalIssuance storage value to be of type StorageValueValue. Got: " + JSON.stringify(item));
+        }
+    }
+
+    return xts;
+}
+
+async function prepareBalancesLocks(
+    toApi: ApiPromise,
+    values: StorageItem[]
+): Promise<Array<SubmittableExtrinsic<ApiTypes, SubmittableResult>>> {
+    let xts: Array<SubmittableExtrinsic<ApiTypes, SubmittableResult>> = new Array();
+
+    let packetOfAccounts: Array<[ Uint8Array,  Uint8Array]> = new Array();
+
+    // @ts-ignore
+    const maxAccountsOnChain = toApi.consts.migration.migrationMaxAccounts.toNumber();
+
+    // For safety reasons we reduce 1/3 of the max amount here
+    const maxAccounts = Math.round(maxAccountsOnChain - ((1/3) * maxAccountsOnChain));
+
+    let counter = 0;
+    for (const item of values) {
+        counter += 1;
+        if (item instanceof StorageMapValue) {
+            if (packetOfAccounts.length === maxAccounts - 1  || counter === values.length) {
+                // push the last element and prepare extrinsic
+                packetOfAccounts.push(await retrieveIdAndAccount(item));
+                const abc = toApi.tx.migration.migrateBalancesLocks(packetOfAccounts);
+                console.log("abc ============> ", abc);
+
+                xts.push(abc)
+
+                packetOfAccounts = new Array();
+            } else {
+                packetOfAccounts.push(await retrieveIdAndAccount(item))
+            }
+        } else {
+            return Promise.reject("Expected System.Account storage values to be of type StorageMapValue. Got: " + JSON.stringify(item));
         }
     }
 
