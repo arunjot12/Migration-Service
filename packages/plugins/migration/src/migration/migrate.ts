@@ -1,6 +1,6 @@
 import {ApiPromise, SubmittableResult} from "@polkadot/api";
 import { xxhashAsHex} from "@polkadot/util-crypto";
-import {AccountId, Balance, Hash, VestingInfo, StakingLedger} from "@polkadot/types/interfaces";
+import {AccountId, Balance, Hash, VestingInfo, StakingLedger , ValidatorCount} from "@polkadot/types/interfaces";
 import {
     StorageItemElement,
     PalletElement,
@@ -52,6 +52,12 @@ export async function verifyMigration(
             if (failed.length !== 0) {
                 failedVerification.push(...failed);
             }
+
+          }  else if (destKey === xxhashAsHex("Balances", 128) + xxhashAsHex("Locks", 128).slice(2)) {
+                let failed = await verifyBalanceLocks(sourceData, source.api, destData, destination.api, destinationStartBlockNumber);
+                if (failed.length !== 0) {
+                    failedVerification.push(...failed);
+                }
         } else if (destKey === xxhashAsHex("Vesting", 128) + xxhashAsHex("Vesting", 128).slice(2)) {
             let failed = await verifyVestingVesting(sourceData, source.api, destData, destination.api, sourceStartBlockNumber, destinationStartBlockNumber);
             if (failed.length > 0) {
@@ -62,6 +68,51 @@ export async function verifyMigration(
             if (failed.length > 0) {
                 failedVerification.push(...failed);
             }
+
+        } else if (destKey === xxhashAsHex("Staking", 128) + xxhashAsHex("ValidatorCount", 128).slice(2)) {
+            let failed = await verifyValidatorCount(sourceData, source.api, destData, destination.api,destinationStartBlockNumber);
+            if (failed.length > 0) {
+                failedVerification.push(...failed);
+            }
+
+
+
+
+
+
+
+
+        } else if (destKey === xxhashAsHex("StakingLedger", 128) + xxhashAsHex("stash", 128).slice(2)) {
+            let failed = await verifystash(sourceData, source.api, destData, destination.api,destinationStartBlockNumber);
+            if (failed.length > 0) {
+                failedVerification.push(...failed);
+            }
+        } else if (destKey === xxhashAsHex("StakingLedger", 128) + xxhashAsHex("total", 128).slice(2)) {
+            let failed = await verifytotal(sourceData, source.api, destData, destination.api,destinationStartBlockNumber);
+            if (failed.length > 0) {
+                failedVerification.push(...failed);
+            }
+        } else if (destKey === xxhashAsHex("StakingLedger", 128) + xxhashAsHex("active", 128).slice(2)) {
+            let failed = await verifyactive(sourceData, source.api, destData, destination.api,destinationStartBlockNumber);
+            if (failed.length > 0) {
+                failedVerification.push(...failed);
+            }
+        } else if (destKey === xxhashAsHex("StakingLedger", 128) + xxhashAsHex("unlocking", 128).slice(2)) {
+            let failed = await verifyunlocking(sourceData, source.api, destData, destination.api,destinationStartBlockNumber);
+            if (failed.length > 0) {
+                failedVerification.push(...failed);
+            }
+        } else if (destKey === xxhashAsHex("StakingLedger", 128) + xxhashAsHex("claimedRewards", 128).slice(2)) {
+            let failed = await verifyclaimedRewards(sourceData, source.api, destData, destination.api,destinationStartBlockNumber);
+            if (failed.length > 0) {
+                failedVerification.push(...failed);
+            }
+
+
+
+
+
+
         } else if (destKey === xxhashAsHex("Claims", 128) + xxhashAsHex("ClaimedAmounts", 128).slice(2)){
             let failed = await verifyClaimsClaimedAmounts(sourceData, source.api, destData, destination.api);
             if(failed.length !== 0) {
@@ -288,6 +339,378 @@ async function verifyBalanceTotalIssuance(
     return failed;
 }
 
+
+
+
+
+async function verifyBalanceLocks(
+    oldData: Array<[StorageKey,  Uint8Array]>,
+    oldApi: ApiPromise,
+    newData: Array<[StorageKey,  Uint8Array]>,
+    newApi: ApiPromise,
+    migrationStartBlock: bigint
+): Promise<Array<[StorageKey,  Uint8Array]>> {
+    let failed = new Array();
+
+    let newDataMap = newData.reduce(function (map, obj) {
+        map.set(obj[0].toHex(), obj[1]);
+        return map;
+    }, new Map<string, Uint8Array>());
+
+    let checked = 0;
+    for(let [key, value] of oldData) {
+        process.stdout.write("    Verifying:    "+ checked +"/ \r");
+
+        let oldLocks = oldApi.createType('Balance', value);
+
+        let newScale = newDataMap.get(key.toHex());
+        if (newScale !== undefined) {
+            let locksBeforeMigrationStorage
+                = await newApi.rpc.state.getStorage(key.toHex(), await newApi.rpc.chain.getBlockHash(migrationStartBlock));
+
+            //@ts-ignore
+            let locksBeforeMigration = newApi.createType('Balance', locksBeforeMigrationStorage.toU8a(true));
+            let newlocks = newApi.createType('Balance', newScale);
+
+            if (oldLocks.toBigInt() !== (newlocks.toBigInt())) {
+                console.log("ERROR locks: New total oldlocks does not match. \n   Old: " + oldLocks.toHuman() + " vs. New: " + (newlocks.toHuman()));
+                failed.push([key, value]);
+            }
+
+        } else {
+            console.log("ERROR locks: New total locks not found...");
+            failed.push([key, value]);
+        }
+
+        checked += 1;
+    }
+
+    return failed;
+}
+
+
+
+
+
+async function verifystash(
+    oldData: Array<[StorageKey,  Uint8Array]>,
+    oldApi: ApiPromise,
+    newData: Array<[StorageKey,  Uint8Array]>,
+    newApi: ApiPromise,
+    migrationStartBlock: bigint
+): Promise<Array<[StorageKey,  Uint8Array]>> {
+    let failed = new Array();
+
+    let newDataMap = newData.reduce(function (map, obj) {
+        map.set(obj[0].toHex(), obj[1]);
+        return map;
+    }, new Map<string, Uint8Array>());
+
+    let checked = 0;
+    for(let [key, value] of oldData) {
+        process.stdout.write("    Verifying:    "+ checked +"/ \r");
+
+        let oldstash = oldApi.createType('StakingLedger', value);
+
+        let newScale = newDataMap.get(key.toHex());
+        if (newScale !== undefined) {
+            let stashBeforeMigrationStorage
+                = await newApi.rpc.state.getStorage(key.toHex(), await newApi.rpc.chain.getBlockHash(migrationStartBlock));
+
+            //@ts-ignore
+            let stashBeforeMigration = newApi.createType('StakingLedger', stashBeforeMigrationStorage.toU8a(true));
+            let newstash = newApi.createType('StakingLedger', newScale);    
+
+            if (oldstash.stash.toString() !== (newstash.stash.toString())) {
+                console.log("ERROR Stash: New stash  does not match. \n   Old: " + oldstash.toHuman() + " vs. New: " + (newstash.toHuman()));
+                failed.push([key, value]);
+            }
+
+            // if (oldStakingLedger.total.toBigInt() !== newStakingLedger.total.toBigInt()) {
+            //     let old = oldStakingLedger.total.toBigInt();
+            //     return Promise.reject("Transformation failed. AccountData Balances. (Left: " + old + " vs. " + "Right: " + newStakingLedger.total.toBigInt());
+            // }
+            
+        } else {
+            console.log("ERROR Stash: New total stash not found...");
+            failed.push([key, value]);
+        }
+
+        checked += 1;
+    }
+
+    return failed;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+async function verifytotal(
+    oldData: Array<[StorageKey,  Uint8Array]>,
+    oldApi: ApiPromise,
+    newData: Array<[StorageKey,  Uint8Array]>,
+    newApi: ApiPromise,
+    migrationStartBlock: bigint
+): Promise<Array<[StorageKey,  Uint8Array]>> {
+    let failed = new Array();
+
+    let newDataMap = newData.reduce(function (map, obj) {
+        map.set(obj[0].toHex(), obj[1]);
+        return map;
+    }, new Map<string, Uint8Array>());
+
+    let checked = 0;
+    for(let [key, value] of oldData) {
+        process.stdout.write("    Verifying:    "+ checked +"/ \r");
+
+        let oldtotal = oldApi.createType('StakingLedger');
+
+        let newScale = newDataMap.get(key.toHex());
+        if (newScale !== undefined) {
+            let totalBeforeMigrationStorage
+                = await newApi.rpc.state.getStorage(key.toHex(), await newApi.rpc.chain.getBlockHash(migrationStartBlock));
+
+            //@ts-ignore
+            let totalBeforeMigration = newApi.createType('StakingLedger', totalBeforeMigrationStorage.toU8a(true));
+            let newtotal = newApi.createType('StakingLedger', newScale);
+
+            if (oldtotal.total.toBigInt() !== (newtotal.total.toBigInt() - totalBeforeMigration.total.toBigInt())) {
+                console.log("ERROR total: New total value does not match. \n   Old: " + oldtotal.toHuman() + " vs. New: " + (newtotal.toHuman()));
+                failed.push([key, value]);
+            }
+
+        } else {
+            console.log("ERROR : New total  not found...");
+            failed.push([key, value]);
+        }
+
+        checked += 1;
+    }
+
+    return failed;
+}
+
+
+async function verifyactive(
+    oldData: Array<[StorageKey,  Uint8Array]>,
+    oldApi: ApiPromise,
+    newData: Array<[StorageKey,  Uint8Array]>,
+    newApi: ApiPromise,
+    migrationStartBlock: bigint
+): Promise<Array<[StorageKey,  Uint8Array]>> {
+    let failed = new Array();
+
+    let newDataMap = newData.reduce(function (map, obj) {
+        map.set(obj[0].toHex(), obj[1]);
+        return map;
+    }, new Map<string, Uint8Array>());
+
+    let checked = 0;
+    for(let [key, value] of oldData) {
+        process.stdout.write("    Verifying:    "+ checked +"/ \r");
+
+        let oldactive = oldApi.createType('StakingLedger', value);
+
+        let newScale = newDataMap.get(key.toHex());
+        if (newScale !== undefined) {
+            let activeBeforeMigrationStorage
+                = await newApi.rpc.state.getStorage(key.toHex(), await newApi.rpc.chain.getBlockHash(migrationStartBlock));
+
+            //@ts-ignore
+            let activeBeforeMigration = newApi.createType('StakingLedger', activeBeforeMigrationStorage.toU8a(true));
+            let newactive = newApi.createType('StakingLedger', newScale);
+
+            if (oldactive.active.toBigInt() !== (newactive.active.toBigInt() - activeBeforeMigration.active.toBigInt())) {
+                console.log("ERROR active:New active does not match. \n   Old: " + oldactive.toHuman() + " vs. New: " + (newactive.toHuman()));
+                failed.push([key, value]);
+            }
+
+        } else {
+            console.log("ERROR active: New active not found...");
+            failed.push([key, value]);
+        }
+
+        checked += 1;
+    }
+
+    return failed;
+}
+
+
+async function verifyunlocking(
+    oldData: Array<[StorageKey,  Uint8Array]>,
+    oldApi: ApiPromise,
+    newData: Array<[StorageKey,  Uint8Array]>,
+    newApi: ApiPromise,
+    migrationStartBlock: bigint
+): Promise<Array<[StorageKey,  Uint8Array]>> {
+    let failed = new Array();
+
+    let newDataMap = newData.reduce(function (map, obj) {
+        map.set(obj[0].toHex(), obj[1]);
+        return map;
+    }, new Map<string, Uint8Array>());
+
+    let checked = 0;
+    for(let [key, value] of oldData) {
+        process.stdout.write("    Verifying:    "+ checked +"/ \r");
+
+        let oldunlocking = oldApi.createType('StakingLedger', value);
+
+        let newScale = newDataMap.get(key.toHex());
+        if (newScale !== undefined) {
+            let unlockingBeforeMigrationStorage
+                = await newApi.rpc.state.getStorage(key.toHex(), await newApi.rpc.chain.getBlockHash(migrationStartBlock));
+
+            //@ts-ignore
+            let unlockingBeforeMigration = newApi.createType('StakingLedger', unlockingBeforeMigrationStorage.toU8a(true));
+            let newunlocking = newApi.createType('StakingLedger', newScale);
+
+            if (oldunlocking.unlocking.toArray() !== (newunlocking.unlocking.toArray() )) {
+                console.log("ERROR Unlocking: New unlocking does not match. \n   Old: " + oldunlocking.toHuman() + " vs. New: " + (newunlocking.toHuman()));
+                failed.push([key, value]);
+            }
+
+        } else {
+            console.log("ERROR Unlocking: New unlockiing not found...");
+            failed.push([key, value]);verifyBalanceTotalIssuance
+        }
+
+        checked += 1;
+    }
+
+    return failed;
+}
+
+async function verifyclaimedRewards(
+    oldData: Array<[StorageKey,  Uint8Array]>,
+    oldApi: ApiPromise,
+    newData: Array<[StorageKey,  Uint8Array]>,
+    newApi: ApiPromise,
+    migrationStartBlock: bigint
+): Promise<Array<[StorageKey,  Uint8Array]>> {
+    let failed = new Array();
+
+    let newDataMap = newData.reduce(function (map, obj) {
+        map.set(obj[0].toHex(), obj[1]);
+        return map;
+    }, new Map<string, Uint8Array>());
+
+    let checked = 0;
+    for(let [key, value] of oldData) {
+        process.stdout.write("    Verifying:    "+ checked +"/ \r");
+
+        let oldclaimedRewards = oldApi.createType('StakingLedger', value);
+
+        let newScale = newDataMap.get(key.toHex());
+        if (newScale !== undefined) {
+            let claimedRewardsBeforeMigrationStorage
+                = await newApi.rpc.state.getStorage(key.toHex(), await newApi.rpc.chain.getBlockHash(migrationStartBlock));
+
+            //@ts-ignore
+            let claimedRewardsBeforeMigration = newApi.createType('StakingLedger', claimedRewardsBeforeMigrationStorage.toU8a(true));
+            let newclaimedRewards = newApi.createType('StakingLedger', newScale);
+
+            if (oldclaimedRewards.claimedRewards.toArray() !== (newclaimedRewards.toArray() )) {
+                console.log("ERROR claimedRewards: New claimed not match. \n   Old: " + oldclaimedRewards.toHuman() + " vs. New: " + (newclaimedRewards.toHuman()));
+                failed.push([key, value]);
+            }
+
+        } else {
+            console.log("ERROR claimedRewards: New claimed not found...");
+            failed.push([key, value]);
+        }
+
+        checked += 1;
+    }
+
+    return failed;
+}
+
+
+
+
+async function verifyValidatorCount(
+    oldData: Array<[StorageKey,  Uint8Array]>,
+    oldApi: ApiPromise,
+    newData: Array<[StorageKey,  Uint8Array]>,
+    newApi: ApiPromise,
+    migrationStartBlock: bigint
+): Promise<Array<[StorageKey,  Uint8Array]>> {
+    let failed = new Array();
+
+    let newDataMap = newData.reduce(function (map, obj) {
+        map.set(obj[0].toHex(), obj[1]);
+        return map;
+    }, new Map<string, Uint8Array>());
+
+    let checked = 0;
+    for(let [key, value] of oldData) {
+        process.stdout.write("    Verifying:    "+ checked +"/ \r");
+
+        let oldvalidatorCount = oldApi.createType('ValidatorCount', value);
+
+        let newScale = newDataMap.get(key.toHex());
+        if (newScale !== undefined) {
+            let validatorBeforeMigrationStorage
+                = await newApi.rpc.state.getStorage(key.toHex(), await newApi.rpc.chain.getBlockHash(migrationStartBlock));
+
+            //@ts-ignore
+            let ValidatorBeforeMigration = newApi.createType('ValidatorCount', validatorBeforeMigrationStorage.toU8a(true));
+            let newvalidatorCount = newApi.createType('ValidatorCount', newScale);
+
+            if (oldvalidatorCount.toBigInt() !== (newvalidatorCount.toBigInt() - ValidatorBeforeMigration.toBigInt())) {
+                console.log("ERROR active:New active does not match. \n   Old: " + oldvalidatorCount.toHuman() + " vs. New: " + (newvalidatorCount.toHuman()));
+                failed.push([key, value]);
+            }
+
+        } else {
+            console.log("ERROR validator: New active not found...");
+            failed.push([key, value]);
+        }
+
+        checked += 1;
+    }
+
+    return failed;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 async function verifyProxyProxies(
     oldData: Array<[StorageKey,  Uint8Array]>,
     oldApi: ApiPromise,
@@ -448,6 +871,9 @@ export async function buildExtrinsics(
             let palletItems = getOrInsertMap(extrinsics, prefix);
             await prepareStaking(toApi, palletItems, keyValues);
         }
+
+    
+
         else if (prefix.startsWith(xxhashAsHex("Contracts", 128))) {
             let palletItems = getOrInsertMap(extrinsics, prefix);
             await prepareContract(toApi, palletItems, keyValues);
@@ -637,7 +1063,14 @@ async function prepareStaking(
     for(let [palletStorageItemKey, values] of Array.from(keyValues)) {
         if (palletStorageItemKey === (xxhashAsHex("Staking", 128) + xxhashAsHex("Ledger", 128).slice(2))) {
             xts.set(palletStorageItemKey, await prepareStakingLedger(toApi, values));
-        } else {
+        }
+        else if (palletStorageItemKey === (xxhashAsHex("Staking", 128) + xxhashAsHex("ValidatorCount", 128).slice(2))) {
+            xts.set(palletStorageItemKey, await prepareStakingValidatorCount(toApi, values));
+        }
+        else if (palletStorageItemKey === (xxhashAsHex("Staking", 128) + xxhashAsHex("Bonded", 128).slice(2))) {
+            xts.set(palletStorageItemKey, await prepareStakingBonded(toApi, values));
+        }
+         else {
             return Promise.reject("Fetched data that can not be migrated. PatriciaKey is: " + palletStorageItemKey);
         }
     }
@@ -833,6 +1266,72 @@ async function prepareStakingLedger(
     return xts;
 }
 
+async function prepareStakingValidatorCount(
+    toApi: ApiPromise,
+    values: StorageItem[]
+): Promise<Array<SubmittableExtrinsic<ApiTypes, SubmittableResult>>> {
+    let xts: Array<SubmittableExtrinsic<ApiTypes, SubmittableResult>> = new Array();
+
+    if (values.length != 1) {
+        throw Error("total valdidators MUST be single value. Got " + values.length);
+    }
+
+    for (const item of values) {
+        if (item instanceof StorageValueValue) {
+            const validatorcounts = toApi.createType("ValidatorCount", item.value);
+            console.log("====================================Validator Counts================",validatorcounts.toHuman());
+            let x = toApi.tx.migration.migrateValidatorCount(validatorcounts.toHuman());
+            console.log('X:', x.toHuman(), typeof x);
+            xts.push(x)
+        } else {
+            return Promise.reject("Expected total validat: " + JSON.stringify(item));
+        }
+    }
+
+    return xts;
+}
+
+
+async function prepareStakingBonded(
+    toApi: ApiPromise,
+    values: StorageItem[]
+): Promise<Array<SubmittableExtrinsic<ApiTypes, SubmittableResult>>> {
+    let xts: Array<SubmittableExtrinsic<ApiTypes, SubmittableResult>> = new Array();
+
+    let packetOfAccounts: Array<[ Uint8Array,  Uint8Array]> = new Array();
+
+    // @ts-ignore
+    const maxAccountsOnChain = toApi.consts.migration.migrationMaxAccounts.toNumber();
+
+    // For safety reasons we reduce 1/3 of the max amount here
+    const maxAccounts = Math.round(maxAccountsOnChain - ((1/3) * maxAccountsOnChain));
+
+    let counter = 0;
+    for (const item of values) {
+        counter += 1;
+        if (item instanceof StorageMapValue) {
+            if (packetOfAccounts.length === maxAccounts - 1  || counter === values.length) {
+                // push the last element and prepare extrinsic
+                packetOfAccounts.push(await retrieveIdAndAccount(item));
+                const abc = toApi.tx.migration.migrateStakingBonded(packetOfAccounts);
+                console.log("abc ============> ", abc);
+
+                xts.push(abc)
+
+                packetOfAccounts = new Array();
+            } else {
+                packetOfAccounts.push(await retrieveIdAndAccount(item))
+            }
+        } else {
+            return Promise.reject("Expected System.Account storage values to be of type StorageMapValue. Got: " + JSON.stringify(item));
+        }
+    }
+
+    return xts;
+}
+
+
+
 async function prepareContractsContractInfoOf(
     toApi: ApiPromise,
     values: StorageItem[]
@@ -893,6 +1392,8 @@ async function prepareBalances(
     }
 }
 
+
+
 async function prepareBalancesTotalIssuance(
     toApi: ApiPromise,
     values: StorageItem[]
@@ -952,6 +1453,48 @@ async function prepareBalancesLocks(
 
     return xts;
 }
+
+
+
+// async function prepareStakingValidatorCount(
+//     toApi: ApiPromise,
+//     values: StorageItem[]
+// ): Promise<Array<SubmittableExtrinsic<ApiTypes, SubmittableResult>>> {
+//     let xts: Array<SubmittableExtrinsic<ApiTypes, SubmittableResult>> = new Array();
+
+//     let packetOfAccounts: Array<[ Uint8Array,  Uint8Array]> = new Array();
+
+//     // @ts-ignore
+//     const maxAccountsOnChain = toApi.consts.migration.migrationMaxAccounts.toNumber();
+
+//     // For safety reasons we reduce 1/3 of the max amount here
+//     const maxAccounts = Math.round(maxAccountsOnChain - ((1/3) * maxAccountsOnChain));
+
+//     let counter = 0;
+//     for (const item of values) {
+//         counter += 1;
+//         if (item instanceof StorageMapValue) {
+//             if (packetOfAccounts.length === maxAccounts - 1  || counter === values.length) {
+//                 // push the last element and prepare extrinsic
+//                 packetOfAccounts.push(await retrieveIdAndAccount(item));
+//                 const abc = toApi.tx.migration.migrateStakingValidatorCount(packetOfAccounts);
+//                 console.log("abc ============> ", abc);
+
+//                 xts.push(abc)
+
+//                 packetOfAccounts = new Array();
+//             } else {
+//                 packetOfAccounts.push(await retrieveIdAndAccount(item))
+//             }
+//         } else {
+//             return Promise.reject("Expected System.Account storage values to be of type StorageMapValue. Got: " + JSON.stringify(item));
+//         }
+//     }
+
+//     return xts;
+// }
+
+
 
 async function prepareVesting(
     toApi: ApiPromise,

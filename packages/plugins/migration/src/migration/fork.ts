@@ -35,7 +35,7 @@ export async function zippedFork(
     return zip;
 }
 
-// Fork the `storageItems` from the given `api` at the given `block`
+// Fork the `storageItems` from the given `api` at  the given `block`
 export async function fork(api: ApiPromise, storageItems: Array<StorageElement>, block: Hash): Promise<Map<string, Array<[ StorageKey, Uint8Array ]>>>   {
     let state: Map<string, Array<[ StorageKey, Uint8Array ]>> = new Map();
     for (const element of storageItems) {
@@ -48,7 +48,7 @@ export async function fork(api: ApiPromise, storageItems: Array<StorageElement>,
 }
 
 async function fetchState(api: ApiPromise, at: Hash, key: StorageKey): Promise<Array<[ StorageKey, Uint8Array ]>> {
-    console.log("Anuj Fetching storage for prefix: " + key.toHuman());
+    console.log("Fetching storage for prefix: " + key.toHuman());
 
     // The substrate api does provide the actual prefix, as the next_key, as we do here, when next key
     // is not available. In order to use the at option, we do this here upfront.
